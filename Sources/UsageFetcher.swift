@@ -109,7 +109,14 @@ class UsageFetcher: NSObject {
     private var orgUUIDCompletion: ((String?) -> Void)?
 
     private func fetchUsage(token: UUID, orgUUID: String) {
-        let url = URL(string: "https://claude.ai/api/organizations/\(orgUUID)/usage")!
+        // orgUUIDはclaude.aiのレスポンスから来る外部データなので、想定外の
+        // 文字が含まれていてもURL(string:)!のクラッシュにしない。
+        guard let encoded = orgUUID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "https://claude.ai/api/organizations/\(encoded)/usage")
+        else {
+            finish(token: token, .failure(FetchError.parseError))
+            return
+        }
         activeNavigation = webView?.load(noCacheRequest(url))
         pendingToken = token
     }
