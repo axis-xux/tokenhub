@@ -16,6 +16,9 @@ class UsageViewModel: ObservableObject {
     @Published var claudeWeekly = UsageCardData(remainingPercent: 0, resetText: "--")
 
     @Published var codexAvailable: Bool = false
+    // 週間制限はCodex CLI側の仕様でnullになることがあるため、5時間制限
+    // とは別に可否を持つ。
+    @Published var codexWeeklyAvailable: Bool = false
     @Published var codexFiveHour = UsageCardData(remainingPercent: 0, resetText: "--")
     @Published var codexWeekly = UsageCardData(remainingPercent: 0, resetText: "--")
 

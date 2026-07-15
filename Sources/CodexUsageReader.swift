@@ -3,7 +3,11 @@ import Foundation
 struct CodexRateLimits {
     let fiveHourPercent: Double
     let fiveHourResetsAt: Date?
-    let weeklyPercent: Double
+    // secondary(週間制限)はCodex CLI側の仕様変更により、プラン種別や
+    // タイミングによってnullで返ってくることがある（2026-07-13頃から
+    // 観測）。primaryが取れていればnilのまま返し、UI側で「データなし」
+    // 表示にする。
+    let weeklyPercent: Double?
     let weeklyResetsAt: Date?
 }
 
@@ -63,9 +67,7 @@ class CodexUsageReader {
                   // used_percentが欠落/型不正なら0扱い（＝実際は不明なのに
                   // 「残り100%」等の誤表示）にせず、この行は無視する。
                   let primary = rateLimits["primary"] as? [String: Any],
-                  let primaryUsedPercent = primary["used_percent"] as? Double,
-                  let secondary = rateLimits["secondary"] as? [String: Any],
-                  let secondaryUsedPercent = secondary["used_percent"] as? Double
+                  let primaryUsedPercent = primary["used_percent"] as? Double
             else { continue }
 
             func resetDate(_ dict: [String: Any]) -> Date? {
@@ -73,11 +75,15 @@ class CodexUsageReader {
                 return Date(timeIntervalSince1970: epoch)
             }
 
+            // secondary(週間制限)はnullで返ってくることがあるため必須にしない。
+            let secondary = rateLimits["secondary"] as? [String: Any]
+            let secondaryUsedPercent = secondary?["used_percent"] as? Double
+
             return CodexRateLimits(
                 fiveHourPercent: primaryUsedPercent,
                 fiveHourResetsAt: resetDate(primary),
                 weeklyPercent: secondaryUsedPercent,
-                weeklyResetsAt: resetDate(secondary)
+                weeklyResetsAt: secondary.flatMap(resetDate)
             )
         }
         return nil

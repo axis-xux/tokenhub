@@ -25,7 +25,7 @@ struct TokenHubView: View {
                           unavailableMessage: model.codexAvailable ? nil : "データなし")
             UsageCardView(icon: "calendar", iconColor: .purple, barColor: .purple,
                           title: "週間制限", data: model.codexWeekly,
-                          unavailableMessage: model.codexAvailable ? nil : "データなし")
+                          unavailableMessage: (model.codexAvailable && model.codexWeeklyAvailable) ? nil : "データなし")
 
             Divider()
 

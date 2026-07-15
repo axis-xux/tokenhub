@@ -138,6 +138,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func applyCodexData(_ limits: CodexRateLimits?) {
         guard let limits = limits else {
             viewModel.codexAvailable = false
+            viewModel.codexWeeklyAvailable = false
             updateStatusBarLabel()
             return
         }
@@ -151,12 +152,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         viewModel.codexFiveHour = UsageCardData(
             remainingPercent: remainingPercent(from: limits.fiveHourPercent), resetText: fiveResetText)
 
-        let dateFmt = DateFormatter()
-        dateFmt.locale = Locale(identifier: "ja_JP")
-        dateFmt.dateFormat = "M/d HH:mm"
-        let weeklyResetText = limits.weeklyResetsAt.map { dateFmt.string(from: $0) } ?? "--"
-        viewModel.codexWeekly = UsageCardData(
-            remainingPercent: remainingPercent(from: limits.weeklyPercent), resetText: weeklyResetText)
+        // 週間制限はCodex CLI側からnullで返ってくることがあるため、
+        // 取れなかった場合は5時間側とは別に「データなし」表示にする。
+        if let weeklyPercent = limits.weeklyPercent {
+            viewModel.codexWeeklyAvailable = true
+            let dateFmt = DateFormatter()
+            dateFmt.locale = Locale(identifier: "ja_JP")
+            dateFmt.dateFormat = "M/d HH:mm"
+            let weeklyResetText = limits.weeklyResetsAt.map { dateFmt.string(from: $0) } ?? "--"
+            viewModel.codexWeekly = UsageCardData(
+                remainingPercent: remainingPercent(from: weeklyPercent), resetText: weeklyResetText)
+        } else {
+            viewModel.codexWeeklyAvailable = false
+            viewModel.codexWeekly = UsageCardData(remainingPercent: 0, resetText: "--")
+        }
 
         updateStatusBarLabel()
     }
@@ -167,13 +176,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateStatusBarLabel() {
         let source = Preferences.shared.menuBarSource
         let data: UsageCardData
+        let available: Bool
         switch source {
-        case .claudeFiveHour: data = viewModel.claudeFiveHour
-        case .claudeWeekly: data = viewModel.claudeWeekly
-        case .codexFiveHour: data = viewModel.codexFiveHour
-        case .codexWeekly: data = viewModel.codexWeekly
+        case .claudeFiveHour: data = viewModel.claudeFiveHour; available = viewModel.claudeAvailable
+        case .claudeWeekly: data = viewModel.claudeWeekly; available = viewModel.claudeAvailable
+        case .codexFiveHour: data = viewModel.codexFiveHour; available = viewModel.codexAvailable
+        case .codexWeekly:
+            data = viewModel.codexWeekly
+            available = viewModel.codexAvailable && viewModel.codexWeeklyAvailable
         }
-        statusItem.button?.title = "\(data.remainingPercent)%"
+        // 選択中ソースが取得不能な場合、data側に古い値が残っていても
+        // それを表示せず「--」にする(取得不能時にstaleな%が出るのを防ぐ)。
+        statusItem.button?.title = available ? "\(data.remainingPercent)%" : "--"
     }
 
     // APIの異常値（負数・100超）でメニューバーやバーグラフが壊れた
