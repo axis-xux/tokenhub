@@ -1,12 +1,11 @@
 import Foundation
 
 struct CodexRateLimits {
-    let fiveHourPercent: Double
+    // 2026-07-13にCodex CLI側の仕様変更でprimary/secondaryの割り当てが
+    // 入れ替わり、5時間側がnullになる（＝primaryが週間を指すようになる）
+    // ケースが確認された。以後、両方ともnullになり得る前提にしている。
+    let fiveHourPercent: Double?
     let fiveHourResetsAt: Date?
-    // secondary(週間制限)はCodex CLI側の仕様変更により、プラン種別や
-    // タイミングによってnullで返ってくることがある（2026-07-13頃から
-    // 観測）。primaryが取れていればnilのまま返し、UI側で「データなし」
-    // 表示にする。
     let weeklyPercent: Double?
     let weeklyResetsAt: Date?
 }
@@ -58,32 +57,53 @@ class CodexUsageReader {
         guard let content = readTail(of: url, maxBytes: 200_000) else { return nil }
         let lines = content.components(separatedBy: "\n")
 
+        struct Window { let usedPercent: Double; let windowMinutes: Double; let resetsAt: Date? }
+
+        func parseWindow(_ dict: [String: Any]?) -> Window? {
+            // used_percent/window_minutesが欠落/型不正なら0扱い（＝実際は
+            // 不明なのに「残り100%」等の誤表示）にせず、このwindowは無視する。
+            guard let dict = dict,
+                  let usedPercent = dict["used_percent"] as? Double,
+                  let windowMinutes = dict["window_minutes"] as? Double
+            else { return nil }
+            let resetsAt = (dict["resets_at"] as? Double).map { Date(timeIntervalSince1970: $0) }
+            return Window(usedPercent: usedPercent, windowMinutes: windowMinutes, resetsAt: resetsAt)
+        }
+
+        // primary/secondaryどちらが5時間でどちらが週間かはCodex CLI側の
+        // 仕様変更で入れ替わることがある（2026-07-13に実際に発生し、
+        // primaryが週間・secondaryがnullになった）ため、固定の対応関係に
+        // 頼らずwindow_minutesの値で判定する。1日(1440分)未満を5時間、
+        // 以上を週間とみなす。
+        let dayThresholdMinutes: Double = 1440
+
         for line in lines.reversed() {
             guard !line.isEmpty, line.contains("\"rate_limits\""),
                   let data = line.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let payload = json["payload"] as? [String: Any],
-                  let rateLimits = payload["rate_limits"] as? [String: Any],
-                  // used_percentが欠落/型不正なら0扱い（＝実際は不明なのに
-                  // 「残り100%」等の誤表示）にせず、この行は無視する。
-                  let primary = rateLimits["primary"] as? [String: Any],
-                  let primaryUsedPercent = primary["used_percent"] as? Double
+                  let rateLimits = payload["rate_limits"] as? [String: Any]
             else { continue }
 
-            func resetDate(_ dict: [String: Any]) -> Date? {
-                guard let epoch = dict["resets_at"] as? Double else { return nil }
-                return Date(timeIntervalSince1970: epoch)
-            }
+            // ここまで来たら"rate_limits"を持つ最新の行が見つかったということ
+            // なので、primary/secondaryが両方ともパース不能でもここで確定
+            // させる。continueして過去の行にフォールバックすると、今は
+            // データがないのに古いstale%を最新値として表示してしまう。
+            let windows = [
+                parseWindow(rateLimits["primary"] as? [String: Any]),
+                parseWindow(rateLimits["secondary"] as? [String: Any]),
+            ].compactMap { $0 }
 
-            // secondary(週間制限)はnullで返ってくることがあるため必須にしない。
-            let secondary = rateLimits["secondary"] as? [String: Any]
-            let secondaryUsedPercent = secondary?["used_percent"] as? Double
+            let fiveHour = windows.filter { $0.windowMinutes < dayThresholdMinutes }
+                .min { $0.windowMinutes < $1.windowMinutes }
+            let weekly = windows.filter { $0.windowMinutes >= dayThresholdMinutes }
+                .max { $0.windowMinutes < $1.windowMinutes }
 
             return CodexRateLimits(
-                fiveHourPercent: primaryUsedPercent,
-                fiveHourResetsAt: resetDate(primary),
-                weeklyPercent: secondaryUsedPercent,
-                weeklyResetsAt: secondary.flatMap(resetDate)
+                fiveHourPercent: fiveHour?.usedPercent,
+                fiveHourResetsAt: fiveHour?.resetsAt,
+                weeklyPercent: weekly?.usedPercent,
+                weeklyResetsAt: weekly?.resetsAt
             )
         }
         return nil

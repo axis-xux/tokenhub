@@ -138,22 +138,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func applyCodexData(_ limits: CodexRateLimits?) {
         guard let limits = limits else {
             viewModel.codexAvailable = false
+            viewModel.codexFiveHourAvailable = false
             viewModel.codexWeeklyAvailable = false
             updateStatusBarLabel()
             return
         }
         viewModel.codexAvailable = true
 
-        let timeFmt = DateFormatter()
-        timeFmt.locale = Locale(identifier: "ja_JP")
-        timeFmt.dateFormat = "HH:mm (M/d)"
+        // 5時間制限・週間制限はCodex CLI側からどちらか一方だけnullで
+        // 返ってくることがある（2026-07-13以降は5時間側がnullになる
+        // ケースを観測）ため、取れなかった側だけ「データなし」表示にする。
+        if let fiveHourPercent = limits.fiveHourPercent {
+            viewModel.codexFiveHourAvailable = true
+            let timeFmt = DateFormatter()
+            timeFmt.locale = Locale(identifier: "ja_JP")
+            timeFmt.dateFormat = "HH:mm (M/d)"
+            let fiveResetText = limits.fiveHourResetsAt.map { timeFmt.string(from: $0) } ?? "--"
+            viewModel.codexFiveHour = UsageCardData(
+                remainingPercent: remainingPercent(from: fiveHourPercent), resetText: fiveResetText)
+        } else {
+            viewModel.codexFiveHourAvailable = false
+            viewModel.codexFiveHour = UsageCardData(remainingPercent: 0, resetText: "--")
+        }
 
-        let fiveResetText = limits.fiveHourResetsAt.map { timeFmt.string(from: $0) } ?? "--"
-        viewModel.codexFiveHour = UsageCardData(
-            remainingPercent: remainingPercent(from: limits.fiveHourPercent), resetText: fiveResetText)
-
-        // 週間制限はCodex CLI側からnullで返ってくることがあるため、
-        // 取れなかった場合は5時間側とは別に「データなし」表示にする。
         if let weeklyPercent = limits.weeklyPercent {
             viewModel.codexWeeklyAvailable = true
             let dateFmt = DateFormatter()
@@ -180,7 +187,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         switch source {
         case .claudeFiveHour: data = viewModel.claudeFiveHour; available = viewModel.claudeAvailable
         case .claudeWeekly: data = viewModel.claudeWeekly; available = viewModel.claudeAvailable
-        case .codexFiveHour: data = viewModel.codexFiveHour; available = viewModel.codexAvailable
+        case .codexFiveHour:
+            data = viewModel.codexFiveHour
+            available = viewModel.codexAvailable && viewModel.codexFiveHourAvailable
         case .codexWeekly:
             data = viewModel.codexWeekly
             available = viewModel.codexAvailable && viewModel.codexWeeklyAvailable

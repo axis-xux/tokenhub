@@ -22,7 +22,7 @@ struct TokenHubView: View {
             sectionLabel("Codex CLI", systemImage: "chevron.left.forwardslash.chevron.right", color: .indigo)
             UsageCardView(icon: "clock.fill", iconColor: .blue, barColor: .blue,
                           title: "5時間制限", data: model.codexFiveHour,
-                          unavailableMessage: model.codexAvailable ? nil : "データなし")
+                          unavailableMessage: (model.codexAvailable && model.codexFiveHourAvailable) ? nil : "データなし")
             UsageCardView(icon: "calendar", iconColor: .purple, barColor: .purple,
                           title: "週間制限", data: model.codexWeekly,
                           unavailableMessage: (model.codexAvailable && model.codexWeeklyAvailable) ? nil : "データなし")
