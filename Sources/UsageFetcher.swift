@@ -108,6 +108,15 @@ class UsageFetcher: NSObject {
 
     private var orgUUIDCompletion: ((String?) -> Void)?
 
+    // アカウントにはAPI用組織（capabilities: api）とclaude.ai用組織
+    // （capabilities: chat）が併存し、並び順は保証されない。先頭を使うと
+    // API組織に使用量を問い合わせて permission_error になる
+    // （2026-09に実際に発生）ため、chat権限を持つ組織を選ぶ。
+    static func chatOrganization(in memberships: [[String: Any]]) -> [String: Any]? {
+        let orgs = memberships.compactMap { $0["organization"] as? [String: Any] }
+        return orgs.first { ($0["capabilities"] as? [String])?.contains("chat") == true } ?? orgs.first
+    }
+
     private func fetchUsage(token: UUID, orgUUID: String) {
         // orgUUIDはclaude.aiのレスポンスから来る外部データなので、想定外の
         // 文字が含まれていてもURL(string:)!のクラッシュにしない。
@@ -171,7 +180,7 @@ extension UsageFetcher: WKNavigationDelegate {
                       let data = text.data(using: .utf8),
                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let memberships = json["memberships"] as? [[String: Any]],
-                      let org = memberships.first?["organization"] as? [String: Any],
+                      let org = Self.chatOrganization(in: memberships),
                       let uuid = org["uuid"] as? String
                 else {
                     self.orgUUIDCompletion?(nil)
