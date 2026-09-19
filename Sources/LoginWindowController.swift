@@ -26,14 +26,11 @@ class LoginWindowController: NSWindowController, WKNavigationDelegate, WKUIDeleg
     // iframeで埋め込む。これらをブロックするとログインが進まないため、
     // メインフレームではなくサブフレーム（iframe）の遷移に限って許可する。
     // メインフレームをこれらのドメインへ遷移させることは引き続き禁止。
+    // a.claude.ai（ページが読み込む補助フレーム）もサブフレーム限定で許可する。
+    // ワイルドカード（*.claude.ai）はメインフレームの攻撃面が広がるため使わない。
     private static let allowedFrameHosts: Set<String> = [
-        "hcaptcha.com", "challenges.cloudflare.com"
+        "hcaptcha.com", "challenges.cloudflare.com", "a.claude.ai"
     ]
-
-    // claude.aiの自社サブドメイン（a.claude.ai等）も許可する。
-    private static func isAllowedHost(_ host: String) -> Bool {
-        allowedHosts.contains(host) || host.hasSuffix(".claude.ai")
-    }
 
     private var loginCompleted = false
 
@@ -100,7 +97,7 @@ class LoginWindowController: NSWindowController, WKNavigationDelegate, WKUIDeleg
         guard let url = navigationAction.request.url,
               url.scheme == "https",
               let host = url.host,
-              Self.isAllowedHost(host)
+              Self.allowedHosts.contains(host)
                 || (!isMainFrame && Self.isAllowedFrameHost(host))
         else {
             decisionHandler(.cancel)
@@ -124,7 +121,7 @@ class LoginWindowController: NSWindowController, WKNavigationDelegate, WKUIDeleg
         guard let url = navigationAction.request.url,
               url.scheme == "https",
               let host = url.host,
-              Self.isAllowedHost(host)
+              Self.allowedHosts.contains(host)
         else { return nil }
 
         popupWindow?.close()
@@ -165,6 +162,10 @@ class LoginWindowController: NSWindowController, WKNavigationDelegate, WKUIDeleg
         popupWindow?.delegate = nil
         popupWindow = nil
         popupWebView = nil
+        // ポップアップSSO完了後はSPAが状態更新するだけの場合があるので再判定する。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.checkLoginStatus()
+        }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -185,6 +186,17 @@ class LoginWindowController: NSWindowController, WKNavigationDelegate, WKUIDeleg
               url.host == "claude.ai" || url.host == "www.claude.ai"
         else { return }
 
+        checkLoginStatus()
+    }
+
+    // /api/account が認証済みで返るかでログイン成功を判定する。
+    // メインフレームのdidFinishだけでは、ポップアップSSO後にSPAが
+    // 状態更新するだけでナビゲーションが起きないケースを拾えないため、
+    // ポップアップを閉じた時にも呼ぶ。
+    private func checkLoginStatus() {
+        guard !loginCompleted, let url = webView.url,
+              url.host == "claude.ai" || url.host == "www.claude.ai"
+        else { return }
         webView.callAsyncJavaScript(
             "const r = await fetch('/api/account', {credentials: 'include'}); return r.status;",
             arguments: [:], in: nil, in: .page
